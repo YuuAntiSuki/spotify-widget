@@ -6,6 +6,7 @@ export default async function handler(req, res) {
   const basic = Buffer.from(`${client_id}:${client_secret}`).toString('base64');
   
   try {
+    // 1. Ambil Access Token
     const tokenRes = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST',
       headers: {
@@ -19,42 +20,72 @@ export default async function handler(req, res) {
     });
 
     const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) throw new Error('Token Error');
+    if (!tokenData.access_token) {
+      return renderSVG(res, "TOKEN ERROR", "Cek Refresh Token / Client Secret", "Error", "#ff4444");
+    }
 
-    const songRes = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` },
-    });
+    const headers = { Authorization: `Bearer ${tokenData.access_token}` };
 
-    let isPlaying = false;
-    let title = "Not Playing";
-    let artist = "Spotify";
+    // 2. Cek Currently Playing
+    const songRes = await fetch('https://api.spotify.com/v1/me/player/currently-playing', { headers });
+
+    let title = "";
+    let artist = "";
+    let statusText = "OFFLINE / PAUSED";
+    let statusColor = "#b3b3b3";
 
     if (songRes.status === 200) {
       const songData = await songRes.json();
-      if (songData && songData.is_playing && songData.item) {
-        isPlaying = true;
-        title = songData.item.name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        artist = songData.item.artists.map(a => a.name).join(', ').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      if (songData && songData.item) {
+        title = songData.item.name;
+        artist = songData.item.artists.map(a => a.name).join(', ');
+        if (songData.is_playing) {
+          statusText = "NOW PLAYING ON SPOTIFY";
+          statusColor = "#1DB954";
+        }
       }
     }
 
-    const statusText = isPlaying ? "NOW PLAYING ON SPOTIFY" : "OFFLINE / PAUSED";
-    const statusColor = isPlaying ? "#1DB954" : "#b3b3b3";
+    // 3. Fallback ke Recently Played jika Web Player mengembalikan status 204
+    if (!title) {
+      const recentRes = await fetch('https://api.spotify.com/v1/me/player/recently-played?limit=1', { headers });
+      if (recentRes.status === 200) {
+        const recentData = await recentRes.json();
+        if (recentData.items && recentData.items.length > 0) {
+          const lastTrack = recentData.items[0].track;
+          title = lastTrack.name;
+          artist = lastTrack.artists.map(a => a.name).join(', ');
+          statusText = "LAST PLAYED ON SPOTIFY";
+          statusColor = "#1DB954";
+        }
+      }
+    }
 
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100">
-      <rect width="100%" height="100%" fill="#121212" rx="12" stroke="#282828" stroke-width="2"/>
-      <circle cx="30" cy="28" r="5" fill="${statusColor}"/>
-      <text x="45" y="32" fill="${statusColor}" font-family="sans-serif" font-size="10" font-weight="bold" letter-spacing="1.5">${statusText}</text>
-      <text x="30" y="58" fill="#ffffff" font-family="sans-serif" font-size="14" font-weight="bold">${title.length > 35 ? title.substring(0, 32) + '...' : title}</text>
-      <text x="30" y="78" fill="#b3b3b3" font-family="sans-serif" font-size="12">${artist.length > 40 ? artist.substring(0, 37) + '...' : artist}</text>
-    </svg>`;
+    if (!title) {
+      title = "Not Playing";
+      artist = "Spotify";
+    }
 
-    res.setHeader('Content-Type', 'image/svg+xml');
-    res.setHeader('Cache-Control', 's-maxage=1, stale-while-revalidate');
-    return res.status(200).send(svg);
+    return renderSVG(res, statusText, title, artist, statusColor);
+
   } catch (err) {
-    const errSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100"><rect width="100%" height="100%" fill="#121212" rx="12"/><text x="50%" y="50%" fill="#b3b3b3" font-family="sans-serif" font-size="13" dominant-baseline="middle" text-anchor="middle">Spotify Connected</text></svg>`;
-    res.setHeader('Content-Type', 'image/svg+xml');
-    return res.status(200).send(errSvg);
+    return renderSVG(res, "SERVER ERROR", err.message || "Unknown error", "Spotify", "#ff4444");
   }
+}
+
+function renderSVG(res, statusText, title, artist, statusColor = "#1DB954") {
+  const cleanTitle = title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const cleanArtist = artist.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100">
+    <rect width="100%" height="100%" fill="#121212" rx="12" stroke="#282828" stroke-width="2"/>
+    <circle cx="30" cy="28" r="5" fill="${statusColor}"/>
+    <text x="45" y="32" fill="${statusColor}" font-family="sans-serif" font-size="10" font-weight="bold" letter-spacing="1.5">${statusText}</text>
+    <text x="30" y="58" fill="#ffffff" font-family="sans-serif" font-size="14" font-weight="bold">${cleanTitle.length > 35 ? cleanTitle.substring(0, 32) + '...' : cleanTitle}</text>
+    <text x="30" y="78" fill="#b3b3b3" font-family="sans-serif" font-size="12">${cleanArtist.length > 40 ? cleanArtist.substring(0, 37) + '...' : cleanArtist}</text>
+  </svg>`;
+
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Cache-Control', 's-maxage=1, stale-while-revalidate');
+  return res.status(200).send(svg);
 }
