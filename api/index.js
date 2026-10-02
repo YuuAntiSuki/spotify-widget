@@ -1,79 +1,31 @@
 export default async function handler(req, res) {
-  const client_id = process.env.SPOTIFY_CLIENT_ID;
-  const client_secret = process.env.SPOTIFY_CLIENT_SECRET;
-  const refresh_token = process.env.SPOTIFY_REFRESH_TOKEN;
+  // Ambil username dari URL (?user=xxx) atau default
+  const username = req.query.user || "YuuAntiSuki";
+  const apiKey = "b25b959554ed76058ac220b7b2e0a026"; // Public Last.fm API Key
 
-  if (!client_id || !client_secret || !refresh_token) {
-    return renderSVG(res, "ENV ERROR", "Variabel Vercel Belum Lengkap", "Cek Vercel Settings", "#ff4444");
-  }
-
-  const basic = Buffer.from(`${client_id}:${client_secret}`).toString('base64');
-  
   try {
-    // 1. Ambil Access Token
-    const tokenRes = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${basic}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token,
-      }),
-    });
+    const response = await fetch(
+      `https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user=${username}&api_key=${apiKey}&format=json&limit=1`
+    );
+    const data = await response.json();
 
-    const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) {
-      const msg = tokenData.error_description || tokenData.error || "Token Invalid";
-      return renderSVG(res, "AUTH ERROR (400)", msg, "Cek Client ID/Secret/Refresh Token", "#ff4444");
+    if (data.error) {
+      return renderSVG(res, "LAST.FM ERROR", data.message, "Cek Username Last.fm", "#ff4444");
     }
 
-    const headers = { Authorization: `Bearer ${tokenData.access_token}` };
-
-    // 2. Cek Currently Playing
-    const songRes = await fetch('https://api.spotify.com/v1/me/player/currently-playing', { headers });
-
-    if (songRes.status === 200) {
-      const songData = await songRes.json();
-      if (songData && songData.item) {
-        const title = songData.item.name;
-        const artist = songData.item.artists.map(a => a.name).join(', ');
-        const isPlaying = songData.is_playing;
-        return renderSVG(
-          res,
-          isPlaying ? "NOW PLAYING ON SPOTIFY" : "PAUSED ON SPOTIFY",
-          title,
-          artist,
-          isPlaying ? "#1DB954" : "#ffb703"
-        );
-      }
+    const track = data.recenttracks?.track?.[0];
+    if (!track) {
+      return renderSVG(res, "OFFLINE / PAUSED", "Belum ada riwayat lagu", "Last.fm", "#b3b3b3");
     }
 
-    // 3. Cek Recently Played (Fallback)
-    const recentRes = await fetch('https://api.spotify.com/v1/me/player/recently-played?limit=1', { headers });
+    const title = track.name;
+    const artist = track.artist["#text"] || track.artist.name;
+    const isPlaying = track["@attr"] && track["@attr"].nowplaying === "true";
 
-    if (recentRes.status === 200) {
-      const recentData = await recentRes.json();
-      if (recentData.items && recentData.items.length > 0) {
-        const lastTrack = recentData.items[0].track;
-        const title = lastTrack.name;
-        const artist = lastTrack.artists.map(a => a.name).join(', ');
-        return renderSVG(res, "LAST PLAYED ON SPOTIFY", title, artist, "#1DB954");
-      }
-    }
+    const statusText = isPlaying ? "NOW PLAYING ON SPOTIFY" : "LAST PLAYED ON SPOTIFY";
+    const statusColor = isPlaying ? "#1DB954" : "#b3b3b3";
 
-    // Diagnostic jika Spotify API mengembalikan Error Code
-    if (songRes.status !== 200 && songRes.status !== 204) {
-      return renderSVG(res, `SPOTIFY API ERROR (${songRes.status})`, `Currently Playing code: ${songRes.status}`, "Cek Scope / Spotify Dev Dashboard", "#ff4444");
-    }
-
-    if (recentRes.status !== 200 && recentRes.status !== 204) {
-      return renderSVG(res, `RECENT API ERROR (${recentRes.status})`, `Recently Played code: ${recentRes.status}`, "Cek Scope user-read-recently-played", "#ff4444");
-    }
-
-    return renderSVG(res, "OFFLINE / PAUSED", "Tidak ada lagu yang terdeteksi", "Spotify", "#b3b3b3");
-
+    return renderSVG(res, statusText, title, artist, statusColor);
   } catch (err) {
     return renderSVG(res, "SERVER ERROR", err.message || "Unknown error", "Vercel", "#ff4444");
   }
