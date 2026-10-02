@@ -44,6 +44,6 @@ function renderSVG(res, statusText, title, artist, statusColor = "#1DB954") {
   </svg>`;
 
   res.setHeader('Content-Type', 'image/svg+xml');
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+ res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0, s-maxage=0');
   return res.status(200).send(svg);
 }
